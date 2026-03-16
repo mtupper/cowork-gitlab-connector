@@ -1,0 +1,27 @@
+{
+  "name": "cowork-gitlab-connector",
+  "version": "0.1.0",
+  "description": "Claude Cowork MCP connector for GitLab — automates documentation tasks like bug reports, MR descriptions, and release notes",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["mcp", "gitlab", "claude", "cowork", "connector"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@gitbeaker/rest": "^42.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "eslint": "^9.0.0"
+  }
+}
