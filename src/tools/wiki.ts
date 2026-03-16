@@ -2,16 +2,27 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { GitLabClient } from "../gitlab/client.js";
 
-export function registerWikiTools(server: McpServer, gitlab: GitLabClient) {
+function resolveProject(project_id: string | undefined, defaultProject: string | undefined): string {
+  const resolved = project_id || defaultProject;
+  if (!resolved) throw new Error("project_id is required (no default project configured)");
+  return resolved;
+}
+
+export function registerWikiTools(server: McpServer, gitlab: GitLabClient, defaultProject?: string) {
+  const projectParam = defaultProject
+    ? z.string().optional().describe(`Project ID or path (default: ${defaultProject})`)
+    : z.string().describe("Project ID or path");
+
   server.tool(
     "list_wiki_pages",
     "List all wiki pages in a project.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
     },
     async ({ project_id }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const pages = await gitlab.withRetry(() =>
-        gitlab.api.ProjectWikis.all(project_id)
+        gitlab.api.ProjectWikis.all(pid)
       );
 
       const results = pages.map((p: { slug: string; title: string; format: string }) => ({
@@ -30,12 +41,13 @@ export function registerWikiTools(server: McpServer, gitlab: GitLabClient) {
     "get_wiki_page",
     "Get the content of a specific wiki page by slug.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       slug: z.string().describe("Wiki page slug"),
     },
     async ({ project_id, slug }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const page = await gitlab.withRetry(() =>
-        gitlab.api.ProjectWikis.show(project_id, slug)
+        gitlab.api.ProjectWikis.show(pid, slug)
       );
 
       return {
@@ -53,14 +65,17 @@ export function registerWikiTools(server: McpServer, gitlab: GitLabClient) {
     "create_wiki_page",
     "Create a new wiki page in a project.",
     {
-      project_id: z.string().describe("Project ID or path"),
-      title: z.string().describe("Page title"),
-      content: z.string().describe("Page content (Markdown)"),
+      project_id: projectParam,
+      title: z.string().min(1).describe("Page title"),
+      content: z.string().min(1).describe("Page content (Markdown)"),
     },
     async ({ project_id, title, content }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const page = await gitlab.withRetry(() =>
-        gitlab.api.ProjectWikis.create(project_id, content, title)
+        gitlab.api.ProjectWikis.create(pid, content, title)
       );
+
+      gitlab.logWrite("create_wiki_page", pid, "wiki_page", page.slug);
 
       return {
         content: [
@@ -77,18 +92,21 @@ export function registerWikiTools(server: McpServer, gitlab: GitLabClient) {
     "update_wiki_page",
     "Update an existing wiki page's content.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       slug: z.string().describe("Wiki page slug"),
       title: z.string().optional().describe("New title"),
-      content: z.string().describe("Updated content (Markdown)"),
+      content: z.string().min(1).describe("Updated content (Markdown)"),
     },
     async ({ project_id, slug, title, content }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const opts: { content: string; title?: string; format?: string } = { content };
       if (title) opts.title = title;
 
       const page = await gitlab.withRetry(() =>
-        gitlab.api.ProjectWikis.edit(project_id, slug, opts as { content: string })
+        gitlab.api.ProjectWikis.edit(pid, slug, opts as { content: string })
       );
+
+      gitlab.logWrite("update_wiki_page", pid, "wiki_page", page.slug);
 
       return {
         content: [

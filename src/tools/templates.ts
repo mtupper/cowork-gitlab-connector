@@ -2,16 +2,27 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { GitLabClient } from "../gitlab/client.js";
 
-export function registerTemplateTools(server: McpServer, gitlab: GitLabClient) {
+function resolveProject(project_id: string | undefined, defaultProject: string | undefined): string {
+  const resolved = project_id || defaultProject;
+  if (!resolved) throw new Error("project_id is required (no default project configured)");
+  return resolved;
+}
+
+export function registerTemplateTools(server: McpServer, gitlab: GitLabClient, defaultProject?: string) {
+  const projectParam = defaultProject
+    ? z.string().optional().describe(`Project ID or path (default: ${defaultProject})`)
+    : z.string().describe("Project ID or path");
+
   server.tool(
     "list_issue_templates",
     "List available issue templates from the project's .gitlab/issue_templates/ directory. Use these to structure bug reports and feature requests.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
     },
     async ({ project_id }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const templates = await gitlab.withRetry(() =>
-        gitlab.api.ProjectTemplates.all(project_id, "issues")
+        gitlab.api.ProjectTemplates.all(pid, "issues")
       );
 
       const results = templates.map((t) => ({
@@ -29,11 +40,12 @@ export function registerTemplateTools(server: McpServer, gitlab: GitLabClient) {
     "list_mr_templates",
     "List available merge request templates from the project's .gitlab/merge_request_templates/ directory.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
     },
     async ({ project_id }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const templates = await gitlab.withRetry(() =>
-        gitlab.api.ProjectTemplates.all(project_id, "merge_requests")
+        gitlab.api.ProjectTemplates.all(pid, "merge_requests")
       );
 
       const results = templates.map((t) => ({
@@ -51,13 +63,14 @@ export function registerTemplateTools(server: McpServer, gitlab: GitLabClient) {
     "get_template",
     "Get the content of a specific issue or merge request template. Use this to populate templates when creating issues or MR descriptions.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       type: z.enum(["issues", "merge_requests"]).describe("Template type"),
       name: z.string().describe("Template name (key)"),
     },
     async ({ project_id, type, name }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const template = await gitlab.withRetry(() =>
-        gitlab.api.ProjectTemplates.show(project_id, type, name)
+        gitlab.api.ProjectTemplates.show(pid, type, name)
       );
 
       return {

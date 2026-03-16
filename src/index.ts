@@ -19,6 +19,7 @@ const server = new McpServer({
 
 const baseUrl = process.env.GITLAB_BASE_URL ?? "https://gitlab.com";
 const token = process.env.GITLAB_TOKEN;
+const defaultProject = process.env.GITLAB_DEFAULT_PROJECT;
 
 if (!token) {
   console.error(
@@ -30,15 +31,28 @@ if (!token) {
 const gitlab = new GitLabClient({ baseUrl, token });
 
 registerProjectTools(server, gitlab);
-registerIssueTools(server, gitlab);
-registerMergeRequestTools(server, gitlab);
-registerLabelMilestoneTools(server, gitlab);
-registerReleaseTools(server, gitlab);
-registerTemplateTools(server, gitlab);
-registerUploadTools(server, gitlab);
-registerWikiTools(server, gitlab);
+registerIssueTools(server, gitlab, defaultProject);
+registerMergeRequestTools(server, gitlab, defaultProject);
+registerLabelMilestoneTools(server, gitlab, defaultProject);
+registerReleaseTools(server, gitlab, defaultProject);
+registerTemplateTools(server, gitlab, defaultProject);
+registerUploadTools(server, gitlab, defaultProject);
+registerWikiTools(server, gitlab, defaultProject);
 
 async function main() {
+  // Validate token before starting the server
+  try {
+    const user = await gitlab.validateToken();
+    console.error(`Authenticated as ${user.username} (${user.name})`);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  if (defaultProject) {
+    console.error(`Default project: ${defaultProject}`);
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Cowork GitLab connector running on stdio");

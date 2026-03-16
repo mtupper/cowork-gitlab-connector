@@ -2,20 +2,31 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { GitLabClient } from "../gitlab/client.js";
 
-export function registerMergeRequestTools(server: McpServer, gitlab: GitLabClient) {
+function resolveProject(project_id: string | undefined, defaultProject: string | undefined): string {
+  const resolved = project_id || defaultProject;
+  if (!resolved) throw new Error("project_id is required (no default project configured)");
+  return resolved;
+}
+
+export function registerMergeRequestTools(server: McpServer, gitlab: GitLabClient, defaultProject?: string) {
+  const projectParam = defaultProject
+    ? z.string().optional().describe(`Project ID or path (default: ${defaultProject})`)
+    : z.string().describe("Project ID or path");
+
   server.tool(
     "list_merge_requests",
     "List merge requests in a project, optionally filtered by state or milestone.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       state: z.enum(["opened", "closed", "merged", "locked"]).optional().default("opened"),
       milestone: z.string().optional().describe("Milestone title to filter by"),
-      per_page: z.number().optional().default(20),
+      per_page: z.number().min(1).max(100).optional().default(20),
     },
     async ({ project_id, state, milestone, per_page }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const mrs = await gitlab.withRetry(() =>
         gitlab.api.MergeRequests.all({
-          projectId: project_id,
+          projectId: pid,
           state,
           milestone,
           perPage: per_page,
@@ -42,12 +53,13 @@ export function registerMergeRequestTools(server: McpServer, gitlab: GitLabClien
     "get_merge_request",
     "Get full details of a specific merge request.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       mr_iid: z.number().describe("Merge request IID"),
     },
     async ({ project_id, mr_iid }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const mr = await gitlab.withRetry(() =>
-        gitlab.api.MergeRequests.show(project_id, mr_iid)
+        gitlab.api.MergeRequests.show(pid, mr_iid)
       );
 
       return {
@@ -60,12 +72,13 @@ export function registerMergeRequestTools(server: McpServer, gitlab: GitLabClien
     "get_mr_diff",
     "Get the diff (changed files and content) for a merge request. Use this to generate MR descriptions.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       mr_iid: z.number().describe("Merge request IID"),
     },
     async ({ project_id, mr_iid }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const changes = await gitlab.withRetry(() =>
-        gitlab.api.MergeRequests.allDiffs(project_id, mr_iid)
+        gitlab.api.MergeRequests.allDiffs(pid, mr_iid)
       );
 
       const diffs = changes.map((d) => ({
@@ -87,14 +100,17 @@ export function registerMergeRequestTools(server: McpServer, gitlab: GitLabClien
     "update_mr_description",
     "Update a merge request's description with Claude-generated content.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       mr_iid: z.number().describe("Merge request IID"),
-      description: z.string().describe("New description (Markdown)"),
+      description: z.string().max(1_000_000).describe("New description (Markdown)"),
     },
     async ({ project_id, mr_iid, description }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const mr = await gitlab.withRetry(() =>
-        gitlab.api.MergeRequests.edit(project_id, mr_iid, { description })
+        gitlab.api.MergeRequests.edit(pid, mr_iid, { description })
       );
+
+      gitlab.logWrite("update_mr_description", pid, "merge_request", mr.iid);
 
       return {
         content: [
@@ -111,14 +127,17 @@ export function registerMergeRequestTools(server: McpServer, gitlab: GitLabClien
     "add_mr_comment",
     "Add a comment to a merge request.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       mr_iid: z.number().describe("Merge request IID"),
-      body: z.string().describe("Comment body (Markdown)"),
+      body: z.string().min(1).describe("Comment body (Markdown)"),
     },
     async ({ project_id, mr_iid, body }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const note = await gitlab.withRetry(() =>
-        gitlab.api.MergeRequestNotes.create(project_id, mr_iid, body)
+        gitlab.api.MergeRequestNotes.create(pid, mr_iid, body)
       );
+
+      gitlab.logWrite("add_mr_comment", pid, "mr_note", note.id);
 
       return {
         content: [

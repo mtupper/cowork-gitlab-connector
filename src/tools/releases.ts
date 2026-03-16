@@ -2,17 +2,28 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { GitLabClient } from "../gitlab/client.js";
 
-export function registerReleaseTools(server: McpServer, gitlab: GitLabClient) {
+function resolveProject(project_id: string | undefined, defaultProject: string | undefined): string {
+  const resolved = project_id || defaultProject;
+  if (!resolved) throw new Error("project_id is required (no default project configured)");
+  return resolved;
+}
+
+export function registerReleaseTools(server: McpServer, gitlab: GitLabClient, defaultProject?: string) {
+  const projectParam = defaultProject
+    ? z.string().optional().describe(`Project ID or path (default: ${defaultProject})`)
+    : z.string().describe("Project ID or path");
+
   server.tool(
     "list_releases",
     "List releases in a GitLab project, ordered by release date descending.",
     {
-      project_id: z.string().describe("Project ID or path"),
-      per_page: z.number().optional().default(20),
+      project_id: projectParam,
+      per_page: z.number().min(1).max(100).optional().default(20),
     },
     async ({ project_id, per_page }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const releases = await gitlab.withRetry(() =>
-        gitlab.api.ProjectReleases.all(project_id, { perPage: per_page })
+        gitlab.api.ProjectReleases.all(pid, { perPage: per_page })
       );
 
       const results = releases.map((r) => ({
@@ -34,14 +45,15 @@ export function registerReleaseTools(server: McpServer, gitlab: GitLabClient) {
     "create_release_notes_draft",
     "Generate a draft of release notes by aggregating merged MRs and closed issues for a given milestone. Returns structured data that Claude can format into release notes.",
     {
-      project_id: z.string().describe("Project ID or path"),
+      project_id: projectParam,
       milestone: z.string().describe("Milestone title to aggregate release notes for"),
     },
     async ({ project_id, milestone }) => {
+      const pid = resolveProject(project_id, defaultProject);
       const [mergeRequests, issues] = await Promise.all([
         gitlab.withRetry(() =>
           gitlab.api.MergeRequests.all({
-            projectId: project_id,
+            projectId: pid,
             milestone,
             state: "merged",
             perPage: 100,
@@ -49,7 +61,7 @@ export function registerReleaseTools(server: McpServer, gitlab: GitLabClient) {
         ),
         gitlab.withRetry(() =>
           gitlab.api.Issues.all({
-            projectId: project_id,
+            projectId: pid,
             milestone,
             state: "closed",
             perPage: 100,
